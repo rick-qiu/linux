@@ -1,12 +1,9 @@
 #include "common.hxx"
 
-// system header files
-// already with extern "C"
 #include <unistd.h>
 #include <sys/un.h>
 #include <sys/types.h>
 #include <sys/socket.h>
-//end of system header files
 
 #include <cerrno>
 #include <cstring>
