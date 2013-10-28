@@ -1,0 +1,41 @@
+#!/bin/bash
+if [ $# -ne 1 ]
+then
+    echo "Usage: $(basename $0) target"
+    exit 1
+fi
+
+if [ -z "${CXX}" ]
+then
+    CXX=$(which clang++ 2>/dev/null)
+    if [ $? -ne 0 ]
+    then
+        CXX=$(which g++ 2>/dev/null)
+    fi
+fi
+
+if [ -z "${CXX}" ]
+then
+    echo ""
+    echo "neither clang++ nor g++ can't be found, please set environment variable CXX"
+    exit 1
+else
+    echo ""
+    echo "CXX=${CXX}"
+fi
+
+if ! [ -x ${CXX} ]
+then
+    echo ""
+    echo "${CXX} doesn't exist or isn't exectable"
+    exit 1
+fi
+
+echo ""
+echo "build target $1 and run test cases..."
+echo ""
+COMMAND="${CXX} -std=c++11 -g -I include $1.cxx $1_test.cxx -o test"
+echo ${COMMAND}
+echo ""
+${COMMAND} && ./test && rm test
+echo ""
