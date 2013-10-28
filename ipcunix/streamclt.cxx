@@ -20,7 +20,7 @@ int main(int argc, char *argv[]) {
     sockaddr_un addr;
     memset(&addr, 0, sizeof(addr));
     addr.sun_family = AF_UNIX;
-    strncpy(addr.sun_path, UNIX_DOMAIN_SOCK, sizeof(addr.sun_path) - 1);
+    strncpy(addr.sun_path[1], UNIX_DOMAIN_SOCK, sizeof(addr.sun_path) - 1);
     connect(sfd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
     int num = 0;
     char buf[256];
