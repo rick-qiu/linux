@@ -16,6 +16,8 @@
 #include <cstdio>
 #include <cstdint>
 
+#include <memory>
+
 using namespace std;
 
 volatile bool stop = false;
@@ -38,6 +40,11 @@ int main(int argc, char *argv[]) {
     printf("   **connect to port 8080:\n");
     printf("   while true; do nc localhost 8080 1>/dev/null 2>&1; if [ $? -ne 0 ]; then break; fi; sleep 5; done\n", getpid());
     printf("=======================================================================\n");
+    struct FDDeleter {
+        void operator()(int* pfd) const {
+            close(*pfd);
+        }
+    };
     constexpr int MAX_EVENTS = 10;
     struct epoll_event ev, events[MAX_EVENTS];
     auto epollfd = epoll_create1(EPOLL_CLOEXEC);
@@ -45,6 +52,7 @@ int main(int argc, char *argv[]) {
         printf("failed to create epoll file descriptor\n");
         return EXIT_FAILURE;
     }
+    unique_ptr<int, FDDeleter> managed_epollfd(&epollfd);
     // create a notify between two threads
     // potentially mimic Event on Windows platform
     auto evfd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
@@ -52,6 +60,7 @@ int main(int argc, char *argv[]) {
         printf("failed to create event file descriptor\n");
         return EXIT_FAILURE;
     }
+    unique_ptr<int, FDDeleter> managed_evfd(&evfd);
     memset(&ev, 0, sizeof(ev));
     ev.events = EPOLLIN;
     ev.data.fd = evfd;
@@ -65,6 +74,7 @@ int main(int argc, char *argv[]) {
         printf("failed to create file descriptor for timer\n");
         return EXIT_FAILURE;
     }
+    unique_ptr<int, FDDeleter> managed_timerfd(&timerfd);
     struct itimerspec timerspec;
     memset(&timerspec, 0, sizeof(timerspec));
     timerspec.it_interval.tv_sec = 5;
@@ -80,9 +90,10 @@ int main(int argc, char *argv[]) {
         printf("failed to add timer file descriptor to epoll monitoring\n");
         return EXIT_FAILURE;
     }
-    // add signal SIGUSR1
+    // add signal SIGINT & SIGUSR1
     sigset_t mask;
     sigemptyset(&mask);
+    sigaddset(&mask, SIGINT);
     sigaddset(&mask, SIGUSR1);
     sigprocmask(SIG_BLOCK, &mask, nullptr);
     auto sigfd = signalfd(-1, &mask, SFD_NONBLOCK | SFD_CLOEXEC);
@@ -90,18 +101,12 @@ int main(int argc, char *argv[]) {
         printf("failed to create file descriptor for signal\n");
         return EXIT_FAILURE;
     }
+    unique_ptr<int, FDDeleter> managed_sigfd(&sigfd);
     memset(&ev, 0, sizeof(ev));
     ev.events = EPOLLIN;
     ev.data.fd = sigfd;
     if(-1 == epoll_ctl(epollfd, EPOLL_CTL_ADD, sigfd, &ev)) {
         printf("failed to add signal file descriptor to epoll monitoring\n");
-        return EXIT_FAILURE;
-    }
-    // IMPORTANT!
-    // create another thread here so that SIGUSR1 will also be blocked in new thread
-    pthread_t thread;
-    if(pthread_create(&thread, nullptr, thread_start, reinterpret_cast<void*>(evfd)) == -1) {
-        printf("failed to create a new thread\n");
         return EXIT_FAILURE;
     }
 
@@ -125,6 +130,7 @@ int main(int argc, char *argv[]) {
         printf("failed to create listening socket\n");
         return EXIT_FAILURE;
     }
+    unique_ptr<int, FDDeleter> managed_sockfd(&sockfd);
     int enable = 1;
     if(-1 == setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(enable))) {
         printf("failed to set socket option\n");
@@ -153,8 +159,16 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
+    // IMPORTANT!
+    // create another thread here so that SIGUSR1 will also be blocked in new thread
+    pthread_t thread;
+    if(pthread_create(&thread, nullptr, thread_start, reinterpret_cast<void*>(evfd)) == -1) {
+        printf("failed to create a new thread\n");
+        return EXIT_FAILURE;
+    }
+
     // start event loop
-    while(true) {
+    while(!stop) {
         auto nfds = epoll_wait(epollfd, events, MAX_EVENTS, -1);
         for(auto i = 0; i < nfds; ++i) {
             if(timerfd == events[i].data.fd) {
@@ -164,7 +178,12 @@ int main(int argc, char *argv[]) {
             } else if(sigfd ==  events[i].data.fd) {
                 struct signalfd_siginfo fdsi;
                 read(sigfd, &fdsi, sizeof(fdsi));
-                printf("signal event received, sender pid: %d, signal no: %d\n", fdsi.ssi_pid, fdsi.ssi_signo);
+                if(SIGINT == fdsi.ssi_signo) {
+                    printf("SIGINT received, exit event loop\n");
+                    stop = true;
+                } else {
+                    printf("signal event received, sender pid: %d, signal no: %d\n", fdsi.ssi_pid, fdsi.ssi_signo);
+                }
             } else if(evfd == events[i].data.fd) {
                 uint64_t value;
                 read(evfd, &value, sizeof(value));
@@ -178,7 +197,7 @@ int main(int argc, char *argv[]) {
                 printf("standard input ready event received, value: %s", buf);
             } else if(sockfd == events[i].data.fd) {
                 auto cfd = accept(sockfd, nullptr, nullptr);
-                close(cfd);
+                unique_ptr<int, FDDeleter> managed_cfd(&cfd);
                 printf("client connection event received, connection closed\n");
             } else {
                 printf("unknown event received\n");
@@ -186,16 +205,9 @@ int main(int argc, char *argv[]) {
         }
         if(-1 == nfds) {
             printf("error on epoll waiting or interrupted, exit event loop\n");
-            break;
+            stop = true;
         }
     }
-    stop = true;
-    timerfd_settime(timerfd, 0, nullptr, nullptr);
-    close(timerfd);
-    close(sigfd);
-    close(epollfd);
     pthread_join(thread, nullptr);
-    close(evfd);
-    close(sockfd);
     return EXIT_SUCCESS;
 }
