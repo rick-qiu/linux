@@ -52,7 +52,7 @@ int main(int argc, char *argv[]) {
         printf("failed to create epoll file descriptor\n");
         return EXIT_FAILURE;
     }
-    unique_ptr<int, FDDeleter> managed_epollfd(&epollfd);
+    unique_ptr<int, FDDeleter> raii_epollfd(&epollfd);
     // create a notify between two threads
     // potentially mimic Event on Windows platform
     auto evfd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
@@ -60,7 +60,7 @@ int main(int argc, char *argv[]) {
         printf("failed to create event file descriptor\n");
         return EXIT_FAILURE;
     }
-    unique_ptr<int, FDDeleter> managed_evfd(&evfd);
+    unique_ptr<int, FDDeleter> raii_evfd(&evfd);
     memset(&ev, 0, sizeof(ev));
     ev.events = EPOLLIN;
     ev.data.fd = evfd;
@@ -74,7 +74,7 @@ int main(int argc, char *argv[]) {
         printf("failed to create file descriptor for timer\n");
         return EXIT_FAILURE;
     }
-    unique_ptr<int, FDDeleter> managed_timerfd(&timerfd);
+    unique_ptr<int, FDDeleter> raii_timerfd(&timerfd);
     struct itimerspec timerspec;
     memset(&timerspec, 0, sizeof(timerspec));
     timerspec.it_interval.tv_sec = 5;
@@ -101,7 +101,7 @@ int main(int argc, char *argv[]) {
         printf("failed to create file descriptor for signal\n");
         return EXIT_FAILURE;
     }
-    unique_ptr<int, FDDeleter> managed_sigfd(&sigfd);
+    unique_ptr<int, FDDeleter> raii_sigfd(&sigfd);
     memset(&ev, 0, sizeof(ev));
     ev.events = EPOLLIN;
     ev.data.fd = sigfd;
@@ -130,7 +130,7 @@ int main(int argc, char *argv[]) {
         printf("failed to create listening socket\n");
         return EXIT_FAILURE;
     }
-    unique_ptr<int, FDDeleter> managed_sockfd(&sockfd);
+    unique_ptr<int, FDDeleter> raii_sockfd(&sockfd);
     int enable = 1;
     if(-1 == setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(enable))) {
         printf("failed to set socket option\n");
@@ -197,7 +197,7 @@ int main(int argc, char *argv[]) {
                 printf("standard input ready event received, value: %s", buf);
             } else if(sockfd == events[i].data.fd) {
                 auto cfd = accept(sockfd, nullptr, nullptr);
-                unique_ptr<int, FDDeleter> managed_cfd(&cfd);
+                unique_ptr<int, FDDeleter> raii_cfd(&cfd);
                 printf("client connection event received, connection closed\n");
             } else {
                 printf("unknown event received\n");
