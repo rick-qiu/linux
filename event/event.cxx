@@ -59,7 +59,7 @@ int main(int argc, char *argv[]) {
         printf("failed to event file descriptor to epoll monitoring\n");
         return EXIT_FAILURE;
     }
-    // add a timer firing every 60 seconds
+    // add a timer firing every 5 seconds
     auto timerfd = timerfd_create(CLOCK_REALTIME, TFD_CLOEXEC | TFD_NONBLOCK);
     if(-1 == timerfd) {
         printf("failed to create file descriptor for timer\n");
