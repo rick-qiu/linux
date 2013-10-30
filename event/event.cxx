@@ -5,6 +5,7 @@
 #include <sys/signalfd.h>
 #include <sys/eventfd.h>
 #include <pthread.h>
+#include <fcntl.h>
 
 #include <cstdlib>
 #include <cstring>
@@ -13,9 +14,11 @@
 
 using namespace std;
 
+volatile bool stop = false;
+
 void* thread_start(void* args) {
     int evfd = reinterpret_cast<uint64_t>(args);
-    while(true) {
+    while(!stop) {
         sleep(5);
         uint64_t value = 5;
         write(evfd, &value, sizeof(value));
@@ -24,7 +27,11 @@ void* thread_start(void* args) {
 }
 
 int main(int argc, char *argv[]) {
-    printf("event processing demonstration, process id: %d\n", getpid());
+    printf("=======================================================================\n");
+    printf("   *****event processing demonstration, process id: [%d]*****\n", getpid());
+    printf("   to send SIGUSR1 to this process, please use below command in shell:\n");
+    printf("   while true; do kill -s SIGUSR1 %d 1>/dev/null 2>&1; if [ $? -ne 0 ]; then break; fi; sleep 5; done\n", getpid());
+    printf("=======================================================================\n");
     constexpr int MAX_EVENTS = 10;
     struct epoll_event ev, events[MAX_EVENTS];
     auto epollfd = epoll_create1(EPOLL_CLOEXEC);
@@ -33,6 +40,7 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
     // create a notify between two threads
+    // potentially mimic Event on Windows platform
     auto evfd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
     if(-1 == evfd) {
         printf("failed to create event file descriptor\n");
@@ -54,7 +62,7 @@ int main(int argc, char *argv[]) {
     struct itimerspec timerspec;
     memset(&timerspec, 0, sizeof(timerspec));
     timerspec.it_interval.tv_sec = 5;
-    timerspec.it_value.tv_sec = 10;
+    timerspec.it_value.tv_sec = 2;
     if(-1 == timerfd_settime(timerfd, 0, &timerspec, nullptr)) {
         printf("failed to start timer\n");
         return EXIT_FAILURE;
@@ -83,6 +91,7 @@ int main(int argc, char *argv[]) {
         printf("failed to add signal file descriptor to epoll monitoring\n");
         return EXIT_FAILURE;
     }
+    // IMPORTANT!
     // create another thread here so that SIGUSR1 will also be blocked in new thread
     pthread_t thread;
     if(pthread_create(&thread, nullptr, thread_start, reinterpret_cast<void*>(evfd)) == -1) {
@@ -90,30 +99,53 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
+    // add standard input file descriptor
+    auto flags = fcntl(STDIN_FILENO, F_GETFL);
+    flags |= O_NONBLOCK;
+    if(-1 == fcntl(STDIN_FILENO, F_SETFL, flags)) {
+        printf("failed to set NONBLOCK on standard input file descriptor\n");
+        return EXIT_FAILURE;
+    }
+    memset(&ev, 0, sizeof(ev));
+    ev.events = EPOLLIN;
+    ev.data.fd = STDIN_FILENO;
+    if(-1 == epoll_ctl(epollfd, EPOLL_CTL_ADD, STDIN_FILENO, &ev)) {
+        printf("failed to stardard input file descriptor to epoll monitoring\n");
+        return EXIT_FAILURE;
+    }
+
     while(true) {
         auto nfds = epoll_wait(epollfd, events, MAX_EVENTS, -1);
         for(auto i = 0; i < nfds; ++i) {
             if(timerfd == events[i].data.fd) {
-                printf("timer fired\n");
                 uint64_t value;
                 read(timerfd, &value, sizeof(value));
+                printf("timer event received, value: %lld\n", value);
             } else if(sigfd ==  events[i].data.fd) {
-                printf("SIGUSR1 event received\n");
                 struct signalfd_siginfo fdsi;
                 read(sigfd, &fdsi, sizeof(fdsi));
+                printf("signal event received, sender pid: %d, signal no: %d\n", fdsi.ssi_pid, fdsi.ssi_signo);
             } else if(evfd == events[i].data.fd) {
-                printf("thread event received\n");
                 uint64_t value;
                 read(evfd, &value, sizeof(value));
-            } else {
+                printf("thread event received, value: %lld\n", value);
+            } else if(STDIN_FILENO == events[i].data.fd) {
+                constexpr int BUF_SIZE = 10;
+                char buf[BUF_SIZE];
+                auto n = read(STDIN_FILENO, buf, sizeof(buf));
+                memset(buf + n, 0, sizeof(buf) - n);
+                buf[sizeof(buf)-1] = '\0';
+                printf("standard input ready event received, value: %s", buf);
+            }else {
                 printf("unknown event received\n");
             }
         }
         if(-1 == nfds) {
-            printf("error on epoll waiting\n");
+            printf("error on epoll waiting or interrupted, exit event loop\n");
             break;
         }
     }
+    stop = true;
     timerfd_settime(timerfd, 0, nullptr, nullptr);
     close(timerfd);
     close(sigfd);
