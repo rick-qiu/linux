@@ -6,6 +6,10 @@
 #include <sys/eventfd.h>
 #include <pthread.h>
 #include <fcntl.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 
 #include <cstdlib>
 #include <cstring>
@@ -29,8 +33,10 @@ void* thread_start(void* args) {
 int main(int argc, char *argv[]) {
     printf("=======================================================================\n");
     printf("   *****event processing demonstration, process id: [%d]*****\n", getpid());
-    printf("   to send SIGUSR1 to this process, please use below command in shell:\n");
+    printf("   **send SIGUSR1 to this process:\n");
     printf("   while true; do kill -s SIGUSR1 %d 1>/dev/null 2>&1; if [ $? -ne 0 ]; then break; fi; sleep 5; done\n", getpid());
+    printf("   **connect to port 8080:\n");
+    printf("   while true; do nc localhost 8080 1>/dev/null 2>&1; if [ $? -ne 0 ]; then break; fi; sleep 5; done\n", getpid());
     printf("=======================================================================\n");
     constexpr int MAX_EVENTS = 10;
     struct epoll_event ev, events[MAX_EVENTS];
@@ -110,10 +116,44 @@ int main(int argc, char *argv[]) {
     ev.events = EPOLLIN;
     ev.data.fd = STDIN_FILENO;
     if(-1 == epoll_ctl(epollfd, EPOLL_CTL_ADD, STDIN_FILENO, &ev)) {
-        printf("failed to stardard input file descriptor to epoll monitoring\n");
+        printf("failed to add stardard input file descriptor to epoll monitoring\n");
+        return EXIT_FAILURE;
+    }
+    // add a listening socket to monitor
+    auto sockfd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+    if(-1 == sockfd) {
+        printf("failed to create listening socket\n");
+        return EXIT_FAILURE;
+    }
+    int enable = 1;
+    if(-1 == setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(enable))) {
+        printf("failed to set socket option\n");
+        return EXIT_FAILURE;
+
+    }
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = INADDR_ANY;
+    addr.sin_port = htons(8080);
+    if(-1 == bind(sockfd, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr))) {
+        printf("failed to bind listening socket\n");
+        return EXIT_FAILURE;
+    }
+    constexpr int BACKLOG = 10;
+    if(-1 == listen(sockfd, BACKLOG)) {
+        printf("failed to listening socket\n");
+        return EXIT_FAILURE;
+    }
+    memset(&ev, 0, sizeof(ev));
+    ev.events = EPOLLIN;
+    ev.data.fd = sockfd;
+    if(-1 == epoll_ctl(epollfd, EPOLL_CTL_ADD, sockfd, &ev)) {
+        printf("failed to add listening socket file descriptor to epoll monitoring\n");
         return EXIT_FAILURE;
     }
 
+    // start event loop
     while(true) {
         auto nfds = epoll_wait(epollfd, events, MAX_EVENTS, -1);
         for(auto i = 0; i < nfds; ++i) {
@@ -136,7 +176,11 @@ int main(int argc, char *argv[]) {
                 memset(buf + n, 0, sizeof(buf) - n);
                 buf[sizeof(buf)-1] = '\0';
                 printf("standard input ready event received, value: %s", buf);
-            }else {
+            } else if(sockfd == events[i].data.fd) {
+                auto cfd = accept(sockfd, nullptr, nullptr);
+                close(cfd);
+                printf("client connection event received, connection closed\n");
+            } else {
                 printf("unknown event received\n");
             }
         }
@@ -152,5 +196,6 @@ int main(int argc, char *argv[]) {
     close(epollfd);
     pthread_join(thread, nullptr);
     close(evfd);
+    close(sockfd);
     return EXIT_SUCCESS;
 }
