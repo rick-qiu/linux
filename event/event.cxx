@@ -45,7 +45,10 @@ int main(int argc, char *argv[]) {
     printf("=======================================================================\n");
     struct FDDeleter {
         void operator()(int* pfd) const {
-            close(*pfd);
+            auto ret = close(*pfd);
+            while(-1 == ret && EINTR == errno) {
+                ret = close(*pfd);
+            }
         }
     };
     constexpr int MAX_EVENTS = 10;
