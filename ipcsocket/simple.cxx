@@ -20,7 +20,8 @@
 #include <memory>
 #include <vector>
 #include <utility>
-#icnlude <algorithm>
+#include <algorithm>
+#include <map>
 
 using namespace std;
 
@@ -39,12 +40,12 @@ public:
     }
 
     void set_data(void* src, int sz) {
-        memcpy(buf, src, min(sizeof(buf), sz));
-        size = sz;
+        memcpy(buf, src, 10);
+        size = 10;
     }
     void get_data(void* des, int& sz) const {
-        memcpy(des, buf, min(sz, size));
-        sz = size;
+        memcpy(des, buf, 10);
+        sz = 10;
     }
     int getsocket() const {
         return socketfd;
@@ -103,7 +104,7 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
-    typedef vector<unique_ptr<client>> container_t;
+    typedef map<int, unique_ptr<client>> container_t;
     container_t clients;
 
     // start event loop
@@ -121,19 +122,33 @@ int main(int argc, char *argv[]) {
                 }
                 memset(&ev, 0, sizeof(ev));
                 ev.events = EPOLLIN;
-                ev.data.ptr = raii_client.get();
+                ev.data.fd = fd;
                 if(-1 == epoll_ctl(epollfd, EPOLL_CTL_ADD, fd, &ev)) {
                     perror("failed to add file descriptor to epoll monitor");
                 }
-                clients.push_back(move(raii_client));
+                pair<int, unique_ptr<client>> p(move(fd), move(raii_client));
+                clients.insert(move(p));
             } else if((EPOLLIN & events[i].events) != 0) {
                 constexpr int BUF_SIZE = 256;
                 char buf[BUF_SIZE];
-                auto p = reinterpret_cast<client*>(events[i].data.ptr);
-                auto num = read(p->getsocket(), buf, sizeof(buf));
-                
+                auto fd = events[i].data.fd;
+                auto num = read(fd, buf, sizeof(buf));
+                if(num > 0) {
+                    clients[fd]->set_data(buf, num);
+                    events[i].events = EPOLLOUT;
+                    epoll_ctl(epollfd, EPOLL_CTL_MOD, fd, &events[i]);
+                } else {
+                    clients.erase(fd);
+                }
             } else if((EPOLLOUT & events[i].events) != 0) {
-            } else {
+                auto fd = events[i].data.fd;
+                constexpr int BUF_SIZE = 256;
+                char buf[BUF_SIZE];
+                int num = BUF_SIZE;
+                clients[fd]->get_data(buf, num);
+                write(fd, buf, num);
+                events[i].events = EPOLLIN;
+                epoll_ctl(epollfd, EPOLL_CTL_MOD, fd, &events[i]);
             }
         }
     }
