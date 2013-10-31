@@ -55,7 +55,7 @@ int main(int argc, char *argv[]) {
     struct epoll_event ev, events[MAX_EVENTS];
     auto epollfd = epoll_create1(EPOLL_CLOEXEC);
     if(-1 == epollfd) {
-        fprintf(stderr, "failed to create epoll file descriptor\n");
+        perror("failed to create epoll file descriptor");
         return EXIT_FAILURE;
     }
     unique_ptr<int, FDDeleter> raii_epollfd(&epollfd);
@@ -63,7 +63,7 @@ int main(int argc, char *argv[]) {
     // potentially mimic Event on Windows platform
     auto evfd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
     if(-1 == evfd) {
-        fprintf(stderr, "failed to create event file descriptor\n");
+        perror("failed to create event file descriptor");
         return EXIT_FAILURE;
     }
     unique_ptr<int, FDDeleter> raii_evfd(&evfd);
@@ -71,13 +71,13 @@ int main(int argc, char *argv[]) {
     ev.events = EPOLLIN;
     ev.data.fd = evfd;
     if(-1 == epoll_ctl(epollfd, EPOLL_CTL_ADD, evfd, &ev)) {
-        fprintf(stderr, "failed to event file descriptor to epoll monitoring\n");
+        perror("failed to event file descriptor to epoll monitoring");
         return EXIT_FAILURE;
     }
     // add a timer firing every 5 seconds
     auto timerfd = timerfd_create(CLOCK_REALTIME, TFD_CLOEXEC | TFD_NONBLOCK);
     if(-1 == timerfd) {
-        fprintf(stderr, "failed to create file descriptor for timer\n");
+        perror("failed to create file descriptor for timer");
         return EXIT_FAILURE;
     }
     unique_ptr<int, FDDeleter> raii_timerfd(&timerfd);
@@ -86,33 +86,33 @@ int main(int argc, char *argv[]) {
     timerspec.it_interval.tv_sec = 5;
     timerspec.it_value.tv_sec = 2;
     if(-1 == timerfd_settime(timerfd, 0, &timerspec, nullptr)) {
-        fprintf(stderr, "failed to start timer\n");
+        perror("failed to start timer");
         return EXIT_FAILURE;
     }
     memset(&ev, 0, sizeof(ev));
     ev.events = EPOLLIN;
     ev.data.fd = timerfd;
     if(-1 == epoll_ctl(epollfd, EPOLL_CTL_ADD, timerfd, &ev)) {
-        fprintf(stderr, "failed to add timer file descriptor to epoll monitoring\n");
+        perror("failed to add timer file descriptor to epoll monitoring");
         return EXIT_FAILURE;
     }
     // block all signals which could be blocked
     sigset_t mask;
     if(-1 == sigemptyset(&mask)) {
-        fprintf(stderr, "failed to initialize signal set\n");
+        perror("failed to initialize signal set");
         return EXIT_FAILURE;
     }
     if(-1 == sigfillset(&mask)) {
-        fprintf(stderr, "failed to fill signal set\n");
+        perror("failed to fill signal set");
         return EXIT_FAILURE;
     }
     if(-1 == sigprocmask(SIG_BLOCK, &mask, nullptr)) {
-        fprintf(stderr, "failed to mask signal set\n");
+        perror("failed to mask signal set");
         return EXIT_FAILURE;
     }
     auto sigfd = signalfd(-1, &mask, SFD_NONBLOCK | SFD_CLOEXEC);
     if(-1 == sigfd) {
-        fprintf(stderr, "failed to create file descriptor for signal\n");
+        perror("failed to create file descriptor for signal");
         return EXIT_FAILURE;
     }
     unique_ptr<int, FDDeleter> raii_sigfd(&sigfd);
@@ -120,7 +120,7 @@ int main(int argc, char *argv[]) {
     ev.events = EPOLLIN;
     ev.data.fd = sigfd;
     if(-1 == epoll_ctl(epollfd, EPOLL_CTL_ADD, sigfd, &ev)) {
-        fprintf(stderr, "failed to add signal file descriptor to epoll monitoring\n");
+        perror("failed to add signal file descriptor to epoll monitoring");
         return EXIT_FAILURE;
     }
 
@@ -128,26 +128,26 @@ int main(int argc, char *argv[]) {
     auto flags = fcntl(STDIN_FILENO, F_GETFL);
     flags |= O_NONBLOCK;
     if(-1 == fcntl(STDIN_FILENO, F_SETFL, flags)) {
-        fprintf(stderr, "failed to set NONBLOCK on standard input file descriptor\n");
+        perror("failed to set NONBLOCK on standard input file descriptor");
         return EXIT_FAILURE;
     }
     memset(&ev, 0, sizeof(ev));
     ev.events = EPOLLIN;
     ev.data.fd = STDIN_FILENO;
     if(-1 == epoll_ctl(epollfd, EPOLL_CTL_ADD, STDIN_FILENO, &ev)) {
-        fprintf(stderr, "failed to add stardard input file descriptor to epoll monitoring\n");
+        perror("failed to add stardard input file descriptor to epoll monitoring");
         return EXIT_FAILURE;
     }
     // add a listening socket to monitor
     auto sockfd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
     if(-1 == sockfd) {
-        fprintf(stderr, "failed to create listening socket\n");
+        perror("failed to create listening socket");
         return EXIT_FAILURE;
     }
     unique_ptr<int, FDDeleter> raii_sockfd(&sockfd);
     int enable = 1;
     if(-1 == setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(enable))) {
-        fprintf(stderr, "failed to set socket option\n");
+        perror("failed to set socket option");
         return EXIT_FAILURE;
 
     }
@@ -157,19 +157,19 @@ int main(int argc, char *argv[]) {
     addr.sin_addr.s_addr = INADDR_ANY;
     addr.sin_port = htons(8080);
     if(-1 == bind(sockfd, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr))) {
-        fprintf(stderr, "failed to bind listening socket\n");
+        perror("failed to bind listening socket");
         return EXIT_FAILURE;
     }
     constexpr int BACKLOG = 10;
     if(-1 == listen(sockfd, BACKLOG)) {
-        fprintf(stderr, "failed to listening socket\n");
+        perror("failed to listening socket");
         return EXIT_FAILURE;
     }
     memset(&ev, 0, sizeof(ev));
     ev.events = EPOLLIN;
     ev.data.fd = sockfd;
     if(-1 == epoll_ctl(epollfd, EPOLL_CTL_ADD, sockfd, &ev)) {
-        fprintf(stderr, "failed to add listening socket file descriptor to epoll monitoring\n");
+        perror("failed to add listening socket file descriptor to epoll monitoring");
         return EXIT_FAILURE;
     }
 
@@ -177,7 +177,7 @@ int main(int argc, char *argv[]) {
     // create another thread here so that SIGUSR1 will also be blocked in new thread
     pthread_t thread;
     if(pthread_create(&thread, nullptr, thread_start, reinterpret_cast<void*>(evfd)) == -1) {
-        fprintf(stderr, "failed to create a new thread\n");
+        perror("failed to create a new thread");
         return EXIT_FAILURE;
     }
 
@@ -221,7 +221,7 @@ int main(int argc, char *argv[]) {
         // if remove EINTR != errno
         if(-1 == nfds && EINTR != errno) {
             auto error_code = errno;
-            fprintf(stderr, "[PID: %d] error: %s, exit event loop\n", getpid(), strerror(error_code));
+            perror("exit event loop");
             stop = true;
         }
     }
