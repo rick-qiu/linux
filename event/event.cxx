@@ -15,12 +15,13 @@
 #include <cstring>
 #include <cstdio>
 #include <cstdint>
+#include <cerrno>
 
 #include <memory>
 
 using namespace std;
 
-volatile bool stop = false;
+volatile bool stop = false; // although volatile variable has no happened-before sematic, it is sufficient here
 
 void* thread_start(void* args) {
     int evfd = reinterpret_cast<uint64_t>(args);
@@ -38,7 +39,9 @@ int main(int argc, char *argv[]) {
     printf("   **send SIGUSR1 to this process:\n");
     printf("   while true; do kill -s SIGUSR1 %d 1>/dev/null 2>&1; if [ $? -ne 0 ]; then break; fi; sleep 5; done\n", getpid());
     printf("   **connect to port 8080:\n");
-    printf("   while true; do nc localhost 8080 1>/dev/null 2>&1; if [ $? -ne 0 ]; then break; fi; sleep 5; done\n", getpid());
+    printf("   while true; do nc localhost 8080 1>/dev/null 2>&1; if [ $? -ne 0 ]; then break; fi; sleep 5; done\n");
+    printf("   **shutdown gracefully:\n");
+    printf("   kill -s SIGUSR2 %d\n", getpid());
     printf("=======================================================================\n");
     struct FDDeleter {
         void operator()(int* pfd) const {
@@ -90,12 +93,20 @@ int main(int argc, char *argv[]) {
         printf("failed to add timer file descriptor to epoll monitoring\n");
         return EXIT_FAILURE;
     }
-    // add signal SIGINT & SIGUSR1
+    // block all signals which could be blocked
     sigset_t mask;
-    sigemptyset(&mask);
-    sigaddset(&mask, SIGINT);
-    sigaddset(&mask, SIGUSR1);
-    sigprocmask(SIG_BLOCK, &mask, nullptr);
+    if(-1 == sigemptyset(&mask)) {
+        printf("failed to initialize signal set\n");
+        return EXIT_FAILURE;
+    }
+    if(-1 == sigfillset(&mask)) {
+        printf("failed to fill signal set\n");
+        return EXIT_FAILURE;
+    }
+    if(-1 == sigprocmask(SIG_BLOCK, &mask, nullptr)) {
+        printf("failed to mask signal set\n");
+        return EXIT_FAILURE;
+    }
     auto sigfd = signalfd(-1, &mask, SFD_NONBLOCK | SFD_CLOEXEC);
     if(-1 == sigfd) {
         printf("failed to create file descriptor for signal\n");
@@ -174,37 +185,40 @@ int main(int argc, char *argv[]) {
             if(timerfd == events[i].data.fd) {
                 uint64_t value;
                 read(timerfd, &value, sizeof(value));
-                printf("timer event received, value: %lld\n", value);
+                printf("[PID: %d] timer event received, value: %lld\n", getpid(), value);
             } else if(sigfd ==  events[i].data.fd) {
                 struct signalfd_siginfo fdsi;
                 read(sigfd, &fdsi, sizeof(fdsi));
-                if(SIGINT == fdsi.ssi_signo) {
-                    printf("SIGINT received, exit event loop\n");
+                if(SIGUSR2 == fdsi.ssi_signo) {
+                    printf("[PID: %d] %s received, exit event loop\n", getpid(), strsignal(fdsi.ssi_signo));
                     stop = true;
                 } else {
-                    printf("signal event received, sender pid: %d, signal no: %d\n", fdsi.ssi_pid, fdsi.ssi_signo);
+                    printf("[PID: %d] signal event received, sender pid: %d, signal: %s\n", getpid(), fdsi.ssi_pid, strsignal(fdsi.ssi_signo));
                 }
             } else if(evfd == events[i].data.fd) {
                 uint64_t value;
                 read(evfd, &value, sizeof(value));
-                printf("thread event received, value: %lld\n", value);
+                printf("[PID: %d] thread event received, value: %lld\n", getpid(), value);
             } else if(STDIN_FILENO == events[i].data.fd) {
                 constexpr int BUF_SIZE = 10;
                 char buf[BUF_SIZE];
                 auto n = read(STDIN_FILENO, buf, sizeof(buf));
                 memset(buf + n, 0, sizeof(buf) - n);
                 buf[sizeof(buf)-1] = '\0';
-                printf("standard input ready event received, value: %s", buf);
+                printf("[PID: %d] standard input ready event received, value: %s", getpid(), buf);
             } else if(sockfd == events[i].data.fd) {
                 auto cfd = accept(sockfd, nullptr, nullptr);
                 unique_ptr<int, FDDeleter> raii_cfd(&cfd);
-                printf("client connection event received, connection closed\n");
+                printf("[PID: %d] client connection event received, connection closed\n", getpid());
             } else {
-                printf("unknown event received\n");
+                printf("[PID: %d] unknown event received\n", getpid());
             }
         }
-        if(-1 == nfds) {
-            printf("error on epoll waiting or interrupted, exit event loop\n");
+        // try "kill -s SIGSTOP $PID" and then "kill -s SIGCONT $PID"
+        // if remove EINTR != errno
+        if(-1 == nfds && EINTR != errno) {
+            auto error_code = errno;
+            printf("[PID: %d] error: %s, exit event loop\n", getpid(), strerror(error_code));
             stop = true;
         }
     }
