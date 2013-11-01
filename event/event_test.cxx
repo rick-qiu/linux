@@ -12,13 +12,9 @@ int main(int argc, char *argv[]) {
     printf("start, process %d\n", getpid());
     try {
         timer_trigger tt(5, [](){ printf("timer fired in thread\n");});
-        thread t;
-        t.register_trigger(tt);
-        while(true) {
-            sleep(10);
-            t.async_call([](){printf("Async task in thread\n");});
-        }
-    } catch(thread_exception& e) {
+        event_loop ep;
+        ep();
+    } catch(event_loop_exception& e) {
         printf("ERROR: %s\n", e.what());
     } catch(timer_exception& e) {
         printf("ERROR: %s\n", e.what());

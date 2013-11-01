@@ -79,8 +79,15 @@ namespace linux {
             hcontainer_t event_helpers;
         };
 
+        class event_loop_exception: public std::runtime_error {
+        public:
+            event_loop_exception(const std::string& msg): runtime_error(msg) {
+            }
+        };
+
         class event_loop {
         public:
+            event_loop();
             void operator()();
             event_loop(event_loop&& ep);
             event_loop(const event_loop& ep) = delete;
@@ -97,6 +104,9 @@ namespace linux {
             std::unique_ptr<int, deleter4fd> async_eventfd_raii;
             int sigfd;
             std::unique_ptr<int, deleter4fd> sigfd_raii;
+            bool exit;
+            constexpr static uint32_t MAX_EVENTS = 10;
+            struct epoll_event events[MAX_EVENTS];
         };
     }
 }
