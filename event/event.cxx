@@ -88,6 +88,9 @@ namespace linux {
         }
 
         void thread::async_call(const function<void()>& callee) {
+#ifdef DEBUG
+            printf("async call received\n");
+#endif
             // could use  RAII
             pthread_mutex_lock(&async_queue_guard);
             async_queue.push(callee);
@@ -102,6 +105,9 @@ namespace linux {
                 auto ret = epoll_wait(epollfd, events, sizeof(events)/sizeof(struct epoll_event), -1);
                 for(auto i = 0; i < ret; ++i) {
                     if(events[i].data.fd == async_eventfd) {
+#ifdef DEBUG
+                        printf("start to process async call\n");
+#endif
                         // a problem potentially, maybe hold the lock too long
                         pthread_mutex_lock(&async_queue_guard);
                         while(!async_queue.empty()) {
