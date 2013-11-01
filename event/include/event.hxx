@@ -12,6 +12,7 @@
 #include <memory>
 #include <string>
 #include <map>
+#include <thread>
 
 namespace linux {
     namespace event {
@@ -76,6 +77,26 @@ namespace linux {
             };
             typedef std::map<int, event_helper> hcontainer_t;
             hcontainer_t event_helpers;
+        };
+
+        class event_loop {
+        public:
+            void operator()();
+            event_loop(event_loop&& ep);
+            event_loop(const event_loop& ep) = delete;
+            event_loop& operator=(const event_loop& ep) = delete;
+            event_loop& operator=(event_loop&& ep);
+            void register_trigger(const trigger& tgr);
+            void register_trigger(trigger&& tgr);
+            void async_call(const std::function<void()>& callee);
+            void async_call(std::function<void()>&& callee);
+        private:
+            int epollfd;
+            std::unique_ptr<int, deleter4fd> epollfd_raii;
+            int async_eventfd;
+            std::unique_ptr<int, deleter4fd> async_eventfd_raii;
+            int sigfd;
+            std::unique_ptr<int, deleter4fd> sigfd_raii;
         };
     }
 }
