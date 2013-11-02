@@ -129,8 +129,7 @@ namespace linux {
                 struct epoll_event ev;
                 ev.data.fd = tgr.native_handle();
                 ev.events = tgr.get_events();
-                auto fn = std::mem_fn(&event_loop::do_register);
-                auto task = std::bind(fn, this, ev);
+                auto task = std::bind(&event_loop::do_register, this, ev);
 
                 std::unique_ptr<T> trigger(new T(std::move(tgr)));
                 auto fd = ev.data.fd;
