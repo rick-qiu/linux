@@ -234,8 +234,8 @@ namespace linux {
             }
         }
 
-        void event_loop::do_register(int epfd, struct epoll_event ev) {
-            if(-1 == epoll_ctl(epfd, EPOLL_CTL_ADD, ev.data.fd, &ev)) {
+        void event_loop::do_register(struct epoll_event ev) {
+            if(-1 == epoll_ctl(epollfd, EPOLL_CTL_ADD, ev.data.fd, &ev)) {
                 throw event_loop_exception(strerror(errno));
             }
         }

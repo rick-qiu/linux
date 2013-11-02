@@ -17,11 +17,7 @@ int main(int argc, char *argv[]) {
         event_loop ep;
         timer_trigger tt(5, [](){ printf("timer fired in thread\n");});
         ep.register_trigger(move(tt));
-        std::thread t(std::move(ep));
-        while(true) {
-            sleep(5);
-            //ep.async_call([](){ printf("async call\n");});
-        }
+        ep();
     } catch(event_loop_exception& e) {
         printf("ERROR: %s\n", e.what());
     } catch(timer_exception& e) {

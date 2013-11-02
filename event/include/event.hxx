@@ -129,7 +129,8 @@ namespace linux {
                 struct epoll_event ev;
                 ev.data.fd = tgr.native_handle();
                 ev.events = tgr.get_events();
-                auto task = std::bind(event_loop::do_register, epollfd, ev);
+                auto fn = std::mem_fn(&event_loop::do_register);
+                auto task = std::bind(fn, this, ev);
 
                 std::unique_ptr<T> trigger(new T(std::move(tgr)));
                 auto fd = ev.data.fd;
@@ -138,7 +139,7 @@ namespace linux {
             }
             void async_call(std::function<void()>&& task);
         private:
-            static void do_register(int epfd, struct epoll_event ev);
+            void do_register(struct epoll_event ev);
             int epollfd;
             std::unique_ptr<int, deleter4fd> epollfd_raii;
             int async_eventfd;
