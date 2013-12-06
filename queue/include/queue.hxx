@@ -65,6 +65,48 @@ namespace linux {
             T* circular_buffer[buffer_size];
         };
 
+        template<typename T>
+        class sr_sw_queue2 {
+        public:
+            sr_sw_queue2(): head(new node()), tail(&(head->next)) {
+            }
+            bool add(T* p) {
+                auto t = new node(p);
+                if(t == nullptr) {
+                    return false;
+                }
+                __asm__ __volatile__ ("" ::: "memory");
+                *tail = t;
+                __asm__ __volatile__ ("" ::: "memory");
+                tail = &(t->next);
+                return true;
+            }
+            bool remove(T*& p) {
+                if(empty()) {
+                    return false;
+                }
+                auto t = head->next;
+                p = t->data;
+                head->next = t->next;
+                delete t;
+                return true;
+            }
+        private:
+            bool empty() {
+                return head->next == *tail;
+            }
+            struct node {
+                node(): data(nullptr), next(nullptr) {
+                }
+                node(T* d): data(d), next(nullptr) {
+                }
+                T* data;
+                node* next;
+            };
+            node* head;
+            node** tail;
+        };
+
         /****************************************************************
          ** single reader and multiple writers
          ***************************************************************/
@@ -150,7 +192,7 @@ namespace linux {
                 return result;
             }
         private:
-            pthread_mutex lock;
+            pthread_mutex_t lock;
             pthread_cond_t slot_available;
             pthread_cond_t item_available;
             std::queue<T>  container;

@@ -15,14 +15,18 @@ struct object {
 };
 
 volatile bool stop = false;
-sr_sw_queue<object> object_queue;
+sr_sw_queue2<object> object_queue;
 sr_mw_queue<object> object_queue2;
 
 void* thread_func(void* arg) {
     printf("new thread is running!\n");
     object* p(nullptr);
-    while(!stop) {
-        if(object_queue.remove(p)) {
+    while(true) {
+        auto ret = object_queue.remove(p);
+        if(stop && !ret) {
+            break;
+        }
+        if(ret) {
             printf("consume object id: %d\n", p->id);
             delete p;
         }
